@@ -7,6 +7,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
@@ -16,7 +17,9 @@ app.use(express.json());
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: {
+    rejectUnauthorized: false,
+  },
 });
 
 pool.connect()
@@ -43,6 +46,7 @@ const createUsersTable = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
     console.log("Users table ready ✅");
   } catch (err) {
     console.error("Table creation error:", err);
@@ -52,10 +56,33 @@ const createUsersTable = async () => {
 createUsersTable();
 
 /* ==============================
+   ALTER TABLE (FOR OLD DATABASES)
+============================== */
+
+const alterTable = async () => {
+  try {
+    await pool.query(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS country VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS state VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS city VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS college VARCHAR(150),
+      ADD COLUMN IF NOT EXISTS bio TEXT;
+    `);
+
+    console.log("Users table updated ✅");
+  } catch (err) {
+    console.error("Alter table error:", err);
+  }
+};
+
+alterTable();
+
+/* ==============================
    AUTH MIDDLEWARE
 ============================== */
 
-const authenticateToken = (req, res, next) => {
+const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
@@ -161,20 +188,18 @@ app.post("/login", async (req, res) => {
    UPDATE PROFILE
 ============================== */
 
-app.put("/profile", authenticateToken, async (req, res) => {
+app.put("/profile", authMiddleware, async (req, res) => {
   try {
     const { country, state, city, college, bio } = req.body;
 
     await pool.query(
-      `
-      UPDATE users
-      SET country = $1,
-          state = $2,
-          city = $3,
-          college = $4,
-          bio = $5
-      WHERE id = $6
-      `,
+      `UPDATE users
+       SET country = $1,
+           state = $2,
+           city = $3,
+           college = $4,
+           bio = $5
+       WHERE id = $6`,
       [country, state, city, college, bio, req.user.id]
     );
 
@@ -190,10 +215,11 @@ app.put("/profile", authenticateToken, async (req, res) => {
    GET PROFILE
 ============================== */
 
-app.get("/profile", authenticateToken, async (req, res) => {
+app.get("/profile", authMiddleware, async (req, res) => {
   try {
     const user = await pool.query(
-      "SELECT id, name, email, country, state, city, college, bio FROM users WHERE id = $1",
+      `SELECT id, name, email, country, state, city, college, bio
+       FROM users WHERE id = $1`,
       [req.user.id]
     );
 
@@ -203,6 +229,17 @@ app.get("/profile", authenticateToken, async (req, res) => {
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
+});
+
+/* ==============================
+   PROTECTED ROUTE
+============================== */
+
+app.get("/protected", authMiddleware, (req, res) => {
+  res.json({
+    message: "Protected route accessed ✅",
+    user: req.user,
+  });
 });
 
 /* ==============================
