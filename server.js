@@ -7,7 +7,6 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
@@ -17,9 +16,7 @@ app.use(express.json());
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  ssl: { rejectUnauthorized: false },
 });
 
 pool.connect()
@@ -27,10 +24,10 @@ pool.connect()
   .catch((err) => console.error("DB Connection Error:", err));
 
 /* ==============================
-   CREATE USERS TABLE
+   CREATE / UPDATE USERS TABLE
 ============================== */
 
-const createUsersTable = async () => {
+const setupUsersTable = async () => {
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -47,20 +44,6 @@ const createUsersTable = async () => {
       );
     `);
 
-    console.log("Users table ready ✅");
-  } catch (err) {
-    console.error("Table creation error:", err);
-  }
-};
-
-createUsersTable();
-
-/* ==============================
-   ALTER TABLE (FOR OLD DATABASES)
-============================== */
-
-const alterTable = async () => {
-  try {
     await pool.query(`
       ALTER TABLE users
       ADD COLUMN IF NOT EXISTS country VARCHAR(100),
@@ -70,13 +53,13 @@ const alterTable = async () => {
       ADD COLUMN IF NOT EXISTS bio TEXT;
     `);
 
-    console.log("Users table updated ✅");
+    console.log("Users table ready & updated ✅");
   } catch (err) {
-    console.error("Alter table error:", err);
+    console.error("Table setup error:", err);
   }
 };
 
-alterTable();
+setupUsersTable();
 
 /* ==============================
    AUTH MIDDLEWARE
@@ -101,7 +84,7 @@ const authMiddleware = (req, res, next) => {
 };
 
 /* ==============================
-   REGISTER ROUTE
+   REGISTER
 ============================== */
 
 app.post("/register", async (req, res) => {
@@ -121,8 +104,7 @@ app.post("/register", async (req, res) => {
       return res.status(400).json({ message: "User already exists" });
     }
 
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     await pool.query(
       "INSERT INTO users (name, email, password) VALUES ($1, $2, $3)",
@@ -138,7 +120,7 @@ app.post("/register", async (req, res) => {
 });
 
 /* ==============================
-   LOGIN ROUTE
+   LOGIN
 ============================== */
 
 app.post("/login", async (req, res) => {
@@ -232,7 +214,54 @@ app.get("/profile", authMiddleware, async (req, res) => {
 });
 
 /* ==============================
-   PROTECTED ROUTE
+   SEARCH USERS (NEW FEATURE)
+============================== */
+
+app.get("/users", async (req, res) => {
+  try {
+    const { country, state, city, college } = req.query;
+
+    let query = `
+      SELECT id, name, email, country, state, city, college, bio
+      FROM users
+      WHERE 1=1
+    `;
+
+    const values = [];
+    let index = 1;
+
+    if (country) {
+      query += ` AND country = $${index++}`;
+      values.push(country);
+    }
+
+    if (state) {
+      query += ` AND state = $${index++}`;
+      values.push(state);
+    }
+
+    if (city) {
+      query += ` AND city = $${index++}`;
+      values.push(city);
+    }
+
+    if (college) {
+      query += ` AND college = $${index++}`;
+      values.push(college);
+    }
+
+    const result = await pool.query(query, values);
+
+    res.json(result.rows);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+/* ==============================
+   PROTECTED TEST ROUTE
 ============================== */
 
 app.get("/protected", authMiddleware, (req, res) => {
