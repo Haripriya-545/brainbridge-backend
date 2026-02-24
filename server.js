@@ -7,12 +7,13 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
-/* ===========================
+/* ==============================
    DATABASE CONNECTION
-=========================== */
+============================== */
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -23,30 +24,34 @@ const pool = new Pool({
 
 pool.connect()
   .then(() => console.log("PostgreSQL Connected ✅"))
-  .catch(err => console.error("Database connection error:", err));
+  .catch((err) => console.error("DB Connection Error:", err));
 
-/* ===========================
+/* ==============================
    CREATE USERS TABLE
-=========================== */
+============================== */
 
-const createTable = async () => {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      name VARCHAR(100) NOT NULL,
-      email VARCHAR(100) UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-  console.log("Users table ready ✅");
+const createUsersTable = async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(100) UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("Users table ready ✅");
+  } catch (err) {
+    console.error("Table creation error:", err);
+  }
 };
 
-createTable();
+createUsersTable();
 
-/* ===========================
+/* ==============================
    REGISTER ROUTE
-=========================== */
+============================== */
 
 app.post("/register", async (req, res) => {
   try {
@@ -76,14 +81,14 @@ app.post("/register", async (req, res) => {
     res.status(201).json({ message: "User registered successfully ✅" });
 
   } catch (err) {
-    console.error(err.message);
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-/* ===========================
+/* ==============================
    LOGIN ROUTE
-=========================== */
+============================== */
 
 app.post("/login", async (req, res) => {
   try {
@@ -123,14 +128,14 @@ app.post("/login", async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err.message);
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-/* ===========================
-   PROTECTED TEST ROUTE
-=========================== */
+/* ==============================
+   PROTECTED ROUTE
+============================== */
 
 app.get("/protected", (req, res) => {
   const authHeader = req.headers.authorization;
@@ -143,15 +148,18 @@ app.get("/protected", (req, res) => {
 
   try {
     const verified = jwt.verify(token, process.env.JWT_SECRET);
-    res.json({ message: "Protected route accessed ✅", user: verified });
+    res.json({
+      message: "Protected route accessed ✅",
+      user: verified,
+    });
   } catch (err) {
     res.status(400).json({ message: "Invalid token" });
   }
 });
 
-/* ===========================
+/* ==============================
    SERVER START
-=========================== */
+============================== */
 
 const PORT = process.env.PORT || 5000;
 
