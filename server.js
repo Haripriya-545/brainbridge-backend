@@ -7,7 +7,6 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
@@ -17,9 +16,7 @@ app.use(express.json());
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  ssl: { rejectUnauthorized: false },
 });
 
 pool.connect()
@@ -38,6 +35,11 @@ const createUsersTable = async () => {
         name VARCHAR(100) NOT NULL,
         email VARCHAR(100) UNIQUE NOT NULL,
         password TEXT NOT NULL,
+        country VARCHAR(100),
+        state VARCHAR(100),
+        city VARCHAR(100),
+        college VARCHAR(150),
+        bio TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -48,6 +50,28 @@ const createUsersTable = async () => {
 };
 
 createUsersTable();
+
+/* ==============================
+   AUTH MIDDLEWARE
+============================== */
+
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).json({ message: "Access denied" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  try {
+    const verified = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = verified;
+    next();
+  } catch (err) {
+    return res.status(400).json({ message: "Invalid token" });
+  }
+};
 
 /* ==============================
    REGISTER ROUTE
@@ -134,26 +158,50 @@ app.post("/login", async (req, res) => {
 });
 
 /* ==============================
-   PROTECTED ROUTE
+   UPDATE PROFILE
 ============================== */
 
-app.get("/protected", (req, res) => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader) {
-    return res.status(401).json({ message: "Access denied" });
-  }
-
-  const token = authHeader.split(" ")[1];
-
+app.put("/profile", authenticateToken, async (req, res) => {
   try {
-    const verified = jwt.verify(token, process.env.JWT_SECRET);
-    res.json({
-      message: "Protected route accessed ✅",
-      user: verified,
-    });
+    const { country, state, city, college, bio } = req.body;
+
+    await pool.query(
+      `
+      UPDATE users
+      SET country = $1,
+          state = $2,
+          city = $3,
+          college = $4,
+          bio = $5
+      WHERE id = $6
+      `,
+      [country, state, city, college, bio, req.user.id]
+    );
+
+    res.json({ message: "Profile updated successfully ✅" });
+
   } catch (err) {
-    res.status(400).json({ message: "Invalid token" });
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+/* ==============================
+   GET PROFILE
+============================== */
+
+app.get("/profile", authenticateToken, async (req, res) => {
+  try {
+    const user = await pool.query(
+      "SELECT id, name, email, country, state, city, college, bio FROM users WHERE id = $1",
+      [req.user.id]
+    );
+
+    res.json(user.rows[0]);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
