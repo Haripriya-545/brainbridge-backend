@@ -245,6 +245,28 @@ app.post("/connect/:userId", authenticateToken, async (req, res) => {
 });
 
 /* ==============================
+   VIEW CONNECTIONS
+============================== */
+
+app.get("/connections", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const result = await pool.query(
+      `SELECT * FROM connections
+       WHERE sender_id=$1 OR receiver_id=$1`,
+      [userId]
+    );
+
+    res.json(result.rows);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+/* ==============================
    SERVER START
 ============================== */
 
