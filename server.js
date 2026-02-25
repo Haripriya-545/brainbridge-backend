@@ -180,7 +180,7 @@ app.put("/profile", authenticateToken, async (req, res) => {
 });
 
 /* ==============================
-   GET USERS / SEARCH BY CITY
+   GET USERS (Search by City)
 ============================== */
 
 app.get("/users", async (req, res) => {
@@ -216,9 +216,8 @@ app.post("/connect/:userId", authenticateToken, async (req, res) => {
     const senderId = req.user.id;
     const receiverId = parseInt(req.params.userId);
 
-    if (senderId === receiverId) {
-      return res.status(400).json({ message: "You cannot connect with yourself" });
-    }
+    if (senderId === receiverId)
+      return res.status(400).json({ message: "Cannot connect yourself" });
 
     const existing = await pool.query(
       `SELECT * FROM connections 
@@ -226,9 +225,8 @@ app.post("/connect/:userId", authenticateToken, async (req, res) => {
       [senderId, receiverId]
     );
 
-    if (existing.rows.length > 0) {
+    if (existing.rows.length > 0)
       return res.status(400).json({ message: "Request already sent" });
-    }
 
     await pool.query(
       `INSERT INTO connections (sender_id, receiver_id)
@@ -259,6 +257,66 @@ app.get("/connections", authenticateToken, async (req, res) => {
     );
 
     res.json(result.rows);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+/* ==============================
+   ACCEPT CONNECTION
+============================== */
+
+app.put("/connect/accept/:id", authenticateToken, async (req, res) => {
+  try {
+    const connectionId = parseInt(req.params.id);
+    const userId = req.user.id;
+
+    const check = await pool.query(
+      "SELECT * FROM connections WHERE id=$1 AND receiver_id=$2",
+      [connectionId, userId]
+    );
+
+    if (check.rows.length === 0)
+      return res.status(403).json({ message: "Not authorized" });
+
+    await pool.query(
+      "UPDATE connections SET status='accepted' WHERE id=$1",
+      [connectionId]
+    );
+
+    res.json({ message: "Connection accepted ✅" });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+/* ==============================
+   REJECT CONNECTION
+============================== */
+
+app.delete("/connect/reject/:id", authenticateToken, async (req, res) => {
+  try {
+    const connectionId = parseInt(req.params.id);
+    const userId = req.user.id;
+
+    const check = await pool.query(
+      "SELECT * FROM connections WHERE id=$1 AND receiver_id=$2",
+      [connectionId, userId]
+    );
+
+    if (check.rows.length === 0)
+      return res.status(403).json({ message: "Not authorized" });
+
+    await pool.query(
+      "DELETE FROM connections WHERE id=$1",
+      [connectionId]
+    );
+
+    res.json({ message: "Connection rejected ❌" });
 
   } catch (err) {
     console.error(err);
