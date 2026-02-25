@@ -21,56 +21,58 @@ const pool = new Pool({
 
 pool.connect()
   .then(() => console.log("PostgreSQL Connected ✅"))
-  .catch((err) => console.error("DB Connection Error:", err));
+  .catch(err => console.error("DB Connection Error:", err));
 
 /* ==============================
-   CREATE / UPDATE USERS TABLE
+   CREATE USERS TABLE
 ============================== */
 
-const setupUsersTable = async () => {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(100) NOT NULL,
-        email VARCHAR(100) UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        country VARCHAR(100),
-        state VARCHAR(100),
-        city VARCHAR(100),
-        college VARCHAR(150),
-        bio TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    await pool.query(`
-      ALTER TABLE users
-      ADD COLUMN IF NOT EXISTS country VARCHAR(100),
-      ADD COLUMN IF NOT EXISTS state VARCHAR(100),
-      ADD COLUMN IF NOT EXISTS city VARCHAR(100),
-      ADD COLUMN IF NOT EXISTS college VARCHAR(150),
-      ADD COLUMN IF NOT EXISTS bio TEXT;
-    `);
-
-    console.log("Users table ready & updated ✅");
-  } catch (err) {
-    console.error("Table setup error:", err);
-  }
+const createUsersTable = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      email VARCHAR(100) UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      country VARCHAR(100),
+      state VARCHAR(100),
+      city VARCHAR(100),
+      college VARCHAR(200),
+      bio TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  console.log("Users table ready ✅");
 };
 
-setupUsersTable();
+createUsersTable();
+
+/* ==============================
+   CREATE CONNECTIONS TABLE
+============================== */
+
+const createConnectionsTable = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS connections (
+      id SERIAL PRIMARY KEY,
+      sender_id INT REFERENCES users(id) ON DELETE CASCADE,
+      receiver_id INT REFERENCES users(id) ON DELETE CASCADE,
+      status VARCHAR(20) DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  console.log("Connections table ready ✅");
+};
+
+createConnectionsTable();
 
 /* ==============================
    AUTH MIDDLEWARE
 ============================== */
 
-const authMiddleware = (req, res, next) => {
+const authenticateToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
-
-  if (!authHeader) {
-    return res.status(401).json({ message: "Access denied" });
-  }
+  if (!authHeader) return res.status(401).json({ message: "Access denied" });
 
   const token = authHeader.split(" ")[1];
 
@@ -78,8 +80,8 @@ const authMiddleware = (req, res, next) => {
     const verified = jwt.verify(token, process.env.JWT_SECRET);
     req.user = verified;
     next();
-  } catch (err) {
-    return res.status(400).json({ message: "Invalid token" });
+  } catch {
+    res.status(400).json({ message: "Invalid token" });
   }
 };
 
@@ -91,30 +93,24 @@ app.post("/register", async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: "All fields are required" });
-    }
-
-    const existingUser = await pool.query(
-      "SELECT * FROM users WHERE email = $1",
+    const existing = await pool.query(
+      "SELECT * FROM users WHERE email=$1",
       [email]
     );
 
-    if (existingUser.rows.length > 0) {
+    if (existing.rows.length > 0)
       return res.status(400).json({ message: "User already exists" });
-    }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashed = await bcrypt.hash(password, 10);
 
     await pool.query(
-      "INSERT INTO users (name, email, password) VALUES ($1, $2, $3)",
-      [name, email, hashedPassword]
+      "INSERT INTO users (name,email,password) VALUES ($1,$2,$3)",
+      [name, email, hashed]
     );
 
-    res.status(201).json({ message: "User registered successfully ✅" });
+    res.status(201).json({ message: "User registered ✅" });
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -127,27 +123,21 @@ app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ message: "All fields are required" });
-    }
-
     const user = await pool.query(
-      "SELECT * FROM users WHERE email = $1",
+      "SELECT * FROM users WHERE email=$1",
       [email]
     );
 
-    if (user.rows.length === 0) {
-      return res.status(400).json({ message: "Invalid email or password" });
-    }
+    if (user.rows.length === 0)
+      return res.status(400).json({ message: "Invalid credentials" });
 
-    const validPassword = await bcrypt.compare(
+    const valid = await bcrypt.compare(
       password,
       user.rows[0].password
     );
 
-    if (!validPassword) {
-      return res.status(400).json({ message: "Invalid email or password" });
-    }
+    if (!valid)
+      return res.status(400).json({ message: "Invalid credentials" });
 
     const token = jwt.sign(
       { id: user.rows[0].id },
@@ -155,13 +145,9 @@ app.post("/login", async (req, res) => {
       { expiresIn: "1h" }
     );
 
-    res.status(200).json({
-      message: "Login successful ✅",
-      token,
-    });
+    res.json({ token });
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -170,105 +156,48 @@ app.post("/login", async (req, res) => {
    UPDATE PROFILE
 ============================== */
 
-app.put("/profile", authMiddleware, async (req, res) => {
+app.put("/profile", authenticateToken, async (req, res) => {
   try {
     const { country, state, city, college, bio } = req.body;
 
     await pool.query(
-      `UPDATE users
-       SET country = $1,
-           state = $2,
-           city = $3,
-           college = $4,
-           bio = $5
-       WHERE id = $6`,
+      `UPDATE users SET country=$1,state=$2,city=$3,college=$4,bio=$5
+       WHERE id=$6`,
       [country, state, city, college, bio, req.user.id]
     );
 
-    res.json({ message: "Profile updated successfully ✅" });
+    res.json({ message: "Profile updated ✅" });
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
 
 /* ==============================
-   GET PROFILE
-============================== */
-
-app.get("/profile", authMiddleware, async (req, res) => {
-  try {
-    const user = await pool.query(
-      `SELECT id, name, email, country, state, city, college, bio
-       FROM users WHERE id = $1`,
-      [req.user.id]
-    );
-
-    res.json(user.rows[0]);
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-/* ==============================
-   SEARCH USERS (NEW FEATURE)
+   GET ALL / SEARCH USERS
 ============================== */
 
 app.get("/users", async (req, res) => {
   try {
-    const { country, state, city, college } = req.query;
-
-    let query = `
-      SELECT id, name, email, country, state, city, college, bio
-      FROM users
-      WHERE 1=1
-    `;
-
-    const values = [];
-    let index = 1;
-
-    if (country) {
-      query += ` AND country = $${index++}`;
-      values.push(country);
-    }
-
-    if (state) {
-      query += ` AND state = $${index++}`;
-      values.push(state);
-    }
+    const { city } = req.query;
 
     if (city) {
-      query += ` AND city = $${index++}`;
-      values.push(city);
+      const result = await pool.query(
+        "SELECT id,name,email,country,state,city FROM users WHERE city ILIKE $1",
+        [city]
+      );
+      return res.json(result.rows);
     }
 
-    if (college) {
-      query += ` AND college = $${index++}`;
-      values.push(college);
-    }
-
-    const result = await pool.query(query, values);
+    const result = await pool.query(
+      "SELECT id,name,email,country,state,city FROM users"
+    );
 
     res.json(result.rows);
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
-});
-
-/* ==============================
-   PROTECTED TEST ROUTE
-============================== */
-
-app.get("/protected", authMiddleware, (req, res) => {
-  res.json({
-    message: "Protected route accessed ✅",
-    user: req.user,
-  });
 });
 
 /* ==============================
