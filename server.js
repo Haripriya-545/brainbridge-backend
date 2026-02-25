@@ -21,7 +21,7 @@ const pool = new Pool({
 
 pool.connect()
   .then(() => console.log("PostgreSQL Connected ✅"))
-  .catch(err => console.error("DB Connection Error:", err));
+  .catch((err) => console.error("DB Connection Error:", err));
 
 /* ==============================
    CREATE USERS TABLE
@@ -72,7 +72,9 @@ createConnectionsTable();
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ message: "Access denied" });
+
+  if (!authHeader)
+    return res.status(401).json({ message: "Access denied" });
 
   const token = authHeader.split(" ")[1];
 
@@ -110,7 +112,8 @@ app.post("/register", async (req, res) => {
 
     res.status(201).json({ message: "User registered ✅" });
 
-  } catch {
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -147,7 +150,8 @@ app.post("/login", async (req, res) => {
 
     res.json({ token });
 
-  } catch {
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -161,20 +165,22 @@ app.put("/profile", authenticateToken, async (req, res) => {
     const { country, state, city, college, bio } = req.body;
 
     await pool.query(
-      `UPDATE users SET country=$1,state=$2,city=$3,college=$4,bio=$5
+      `UPDATE users 
+       SET country=$1, state=$2, city=$3, college=$4, bio=$5
        WHERE id=$6`,
       [country, state, city, college, bio, req.user.id]
     );
 
     res.json({ message: "Profile updated ✅" });
 
-  } catch {
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
 /* ==============================
-   GET ALL / SEARCH USERS
+   GET USERS / SEARCH BY CITY
 ============================== */
 
 app.get("/users", async (req, res) => {
@@ -195,7 +201,45 @@ app.get("/users", async (req, res) => {
 
     res.json(result.rows);
 
-  } catch {
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+/* ==============================
+   SEND CONNECTION REQUEST
+============================== */
+
+app.post("/connect/:userId", authenticateToken, async (req, res) => {
+  try {
+    const senderId = req.user.id;
+    const receiverId = parseInt(req.params.userId);
+
+    if (senderId === receiverId) {
+      return res.status(400).json({ message: "You cannot connect with yourself" });
+    }
+
+    const existing = await pool.query(
+      `SELECT * FROM connections 
+       WHERE sender_id=$1 AND receiver_id=$2`,
+      [senderId, receiverId]
+    );
+
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ message: "Request already sent" });
+    }
+
+    await pool.query(
+      `INSERT INTO connections (sender_id, receiver_id)
+       VALUES ($1,$2)`,
+      [senderId, receiverId]
+    );
+
+    res.json({ message: "Connection request sent ✅" });
+
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
