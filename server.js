@@ -53,7 +53,17 @@ const createTables = async () => {
     );
   `);
 
-  console.log("Tables ready ✅");
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id SERIAL PRIMARY KEY,
+      sender_id INT REFERENCES users(id) ON DELETE CASCADE,
+      receiver_id INT REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  console.log("All tables ready ✅");
 };
 
 createTables();
@@ -64,7 +74,6 @@ createTables();
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
-
   if (!authHeader)
     return res.status(401).json({ message: "Access denied" });
 
@@ -103,7 +112,6 @@ app.post("/register", async (req, res) => {
     );
 
     res.status(201).json({ message: "User registered ✅" });
-
   } catch {
     res.status(500).json({ message: "Server error" });
   }
@@ -140,7 +148,6 @@ app.post("/login", async (req, res) => {
     );
 
     res.json({ token });
-
   } catch {
     res.status(500).json({ message: "Server error" });
   }
@@ -162,14 +169,13 @@ app.put("/profile", authenticateToken, async (req, res) => {
     );
 
     res.json({ message: "Profile updated ✅" });
-
   } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
 
 /* ==============================
-   GET USERS (Search by City)
+   GET USERS
 ============================== */
 
 app.get("/users", async (req, res) => {
@@ -189,14 +195,13 @@ app.get("/users", async (req, res) => {
     );
 
     res.json(result.rows);
-
   } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
 
 /* ==============================
-   SEND CONNECTION REQUEST
+   CONNECTION SYSTEM
 ============================== */
 
 app.post("/connect/:userId", authenticateToken, async (req, res) => {
@@ -223,15 +228,10 @@ app.post("/connect/:userId", authenticateToken, async (req, res) => {
     );
 
     res.json({ message: "Connection request sent ✅" });
-
   } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
-
-/* ==============================
-   VIEW CONNECTIONS (FILTERABLE)
-============================== */
 
 app.get("/connections", authenticateToken, async (req, res) => {
   try {
@@ -253,15 +253,10 @@ app.get("/connections", authenticateToken, async (req, res) => {
     const result = await pool.query(query, values);
 
     res.json(result.rows);
-
   } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
-
-/* ==============================
-   ACCEPT CONNECTION
-============================== */
 
 app.put("/connect/accept/:id", authenticateToken, async (req, res) => {
   try {
@@ -282,43 +277,28 @@ app.put("/connect/accept/:id", authenticateToken, async (req, res) => {
     );
 
     res.json({ message: "Connection accepted ✅" });
-
   } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
-
-/* ==============================
-   REJECT CONNECTION
-============================== */
 
 app.delete("/connect/reject/:id", authenticateToken, async (req, res) => {
   try {
     const connectionId = parseInt(req.params.id);
     const userId = req.user.id;
 
-    const check = await pool.query(
-      "SELECT * FROM connections WHERE id=$1 AND receiver_id=$2",
-      [connectionId, userId]
-    );
-
-    if (check.rows.length === 0)
-      return res.status(403).json({ message: "Not authorized" });
-
-    await pool.query(
-      "DELETE FROM connections WHERE id=$1",
-      [connectionId]
-    );
+    await pool.query("DELETE FROM connections WHERE id=$1", [
+      connectionId,
+    ]);
 
     res.json({ message: "Connection rejected ❌" });
-
   } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
 
 /* ==============================
-   FRIEND LIST (ACCEPTED ONLY)
+   FRIEND LIST
 ============================== */
 
 app.get("/friends", authenticateToken, async (req, res) => {
@@ -341,7 +321,54 @@ app.get("/friends", authenticateToken, async (req, res) => {
     );
 
     res.json(result.rows);
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
+/* ==============================
+   MESSAGING SYSTEM
+============================== */
+
+app.post("/message/:userId", authenticateToken, async (req, res) => {
+  try {
+    const senderId = req.user.id;
+    const receiverId = parseInt(req.params.userId);
+    const { content } = req.body;
+
+    if (!content)
+      return res.status(400).json({ message: "Message cannot be empty" });
+
+    await pool.query(
+      `INSERT INTO messages (sender_id, receiver_id, content)
+       VALUES ($1,$2,$3)`,
+      [senderId, receiverId, content]
+    );
+
+    res.json({ message: "Message sent ✅" });
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+app.get("/chat/:userId", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const otherUserId = parseInt(req.params.userId);
+
+    const messages = await pool.query(
+      `
+      SELECT * FROM messages
+      WHERE
+        (sender_id=$1 AND receiver_id=$2)
+        OR
+        (sender_id=$2 AND receiver_id=$1)
+      ORDER BY created_at ASC
+      `,
+      [userId, otherUserId]
+    );
+
+    res.json(messages.rows);
   } catch {
     res.status(500).json({ message: "Server error" });
   }
