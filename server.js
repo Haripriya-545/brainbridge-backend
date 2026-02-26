@@ -24,10 +24,10 @@ pool.connect()
   .catch((err) => console.error("DB Connection Error:", err));
 
 /* ==============================
-   CREATE USERS TABLE
+   CREATE TABLES
 ============================== */
 
-const createUsersTable = async () => {
+const createTables = async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -42,16 +42,7 @@ const createUsersTable = async () => {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
-  console.log("Users table ready ✅");
-};
 
-createUsersTable();
-
-/* ==============================
-   CREATE CONNECTIONS TABLE
-============================== */
-
-const createConnectionsTable = async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS connections (
       id SERIAL PRIMARY KEY,
@@ -61,10 +52,11 @@ const createConnectionsTable = async () => {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
-  console.log("Connections table ready ✅");
+
+  console.log("Tables ready ✅");
 };
 
-createConnectionsTable();
+createTables();
 
 /* ==============================
    AUTH MIDDLEWARE
@@ -112,8 +104,7 @@ app.post("/register", async (req, res) => {
 
     res.status(201).json({ message: "User registered ✅" });
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -150,8 +141,7 @@ app.post("/login", async (req, res) => {
 
     res.json({ token });
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -173,8 +163,7 @@ app.put("/profile", authenticateToken, async (req, res) => {
 
     res.json({ message: "Profile updated ✅" });
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -201,8 +190,7 @@ app.get("/users", async (req, res) => {
 
     res.json(result.rows);
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -236,30 +224,37 @@ app.post("/connect/:userId", authenticateToken, async (req, res) => {
 
     res.json({ message: "Connection request sent ✅" });
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
 
 /* ==============================
-   VIEW CONNECTIONS
+   VIEW CONNECTIONS (FILTERABLE)
 ============================== */
 
 app.get("/connections", authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
+    const { status } = req.query;
 
-    const result = await pool.query(
-      `SELECT * FROM connections
-       WHERE sender_id=$1 OR receiver_id=$1`,
-      [userId]
-    );
+    let query = `
+      SELECT * FROM connections
+      WHERE (sender_id=$1 OR receiver_id=$1)
+    `;
+
+    let values = [userId];
+
+    if (status) {
+      query += " AND status=$2";
+      values.push(status);
+    }
+
+    const result = await pool.query(query, values);
 
     res.json(result.rows);
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -288,8 +283,7 @@ app.put("/connect/accept/:id", authenticateToken, async (req, res) => {
 
     res.json({ message: "Connection accepted ✅" });
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -318,8 +312,37 @@ app.delete("/connect/reject/:id", authenticateToken, async (req, res) => {
 
     res.json({ message: "Connection rejected ❌" });
 
-  } catch (err) {
-    console.error(err);
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+/* ==============================
+   FRIEND LIST (ACCEPTED ONLY)
+============================== */
+
+app.get("/friends", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const result = await pool.query(
+      `
+      SELECT u.id, u.name, u.email, u.city
+      FROM connections c
+      JOIN users u
+        ON (
+          (c.sender_id = $1 AND c.receiver_id = u.id)
+          OR
+          (c.receiver_id = $1 AND c.sender_id = u.id)
+        )
+      WHERE c.status = 'accepted'
+      `,
+      [userId]
+    );
+
+    res.json(result.rows);
+
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
