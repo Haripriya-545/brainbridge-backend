@@ -236,21 +236,12 @@ app.post("/connect/:userId", authenticateToken, async (req, res) => {
 app.get("/connections", authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const { status } = req.query;
 
-    let query = `
-      SELECT * FROM connections
-      WHERE (sender_id=$1 OR receiver_id=$1)
-    `;
-
-    let values = [userId];
-
-    if (status) {
-      query += " AND status=$2";
-      values.push(status);
-    }
-
-    const result = await pool.query(query, values);
+    const result = await pool.query(
+      `SELECT * FROM connections
+       WHERE sender_id=$1 OR receiver_id=$1`,
+      [userId]
+    );
 
     res.json(result.rows);
   } catch {
@@ -260,38 +251,12 @@ app.get("/connections", authenticateToken, async (req, res) => {
 
 app.put("/connect/accept/:id", authenticateToken, async (req, res) => {
   try {
-    const connectionId = parseInt(req.params.id);
-    const userId = req.user.id;
-
-    const check = await pool.query(
-      "SELECT * FROM connections WHERE id=$1 AND receiver_id=$2",
-      [connectionId, userId]
-    );
-
-    if (check.rows.length === 0)
-      return res.status(403).json({ message: "Not authorized" });
-
     await pool.query(
       "UPDATE connections SET status='accepted' WHERE id=$1",
-      [connectionId]
+      [req.params.id]
     );
 
     res.json({ message: "Connection accepted ✅" });
-  } catch {
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-app.delete("/connect/reject/:id", authenticateToken, async (req, res) => {
-  try {
-    const connectionId = parseInt(req.params.id);
-    const userId = req.user.id;
-
-    await pool.query("DELETE FROM connections WHERE id=$1", [
-      connectionId,
-    ]);
-
-    res.json({ message: "Connection rejected ❌" });
   } catch {
     res.status(500).json({ message: "Server error" });
   }
@@ -327,22 +292,17 @@ app.get("/friends", authenticateToken, async (req, res) => {
 });
 
 /* ==============================
-   MESSAGING SYSTEM
+   MESSAGING
 ============================== */
 
 app.post("/message/:userId", authenticateToken, async (req, res) => {
   try {
-    const senderId = req.user.id;
-    const receiverId = parseInt(req.params.userId);
     const { content } = req.body;
-
-    if (!content)
-      return res.status(400).json({ message: "Message cannot be empty" });
 
     await pool.query(
       `INSERT INTO messages (sender_id, receiver_id, content)
        VALUES ($1,$2,$3)`,
-      [senderId, receiverId, content]
+      [req.user.id, req.params.userId, content]
     );
 
     res.json({ message: "Message sent ✅" });
@@ -353,9 +313,6 @@ app.post("/message/:userId", authenticateToken, async (req, res) => {
 
 app.get("/chat/:userId", authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.id;
-    const otherUserId = parseInt(req.params.userId);
-
     const messages = await pool.query(
       `
       SELECT * FROM messages
@@ -365,10 +322,31 @@ app.get("/chat/:userId", authenticateToken, async (req, res) => {
         (sender_id=$2 AND receiver_id=$1)
       ORDER BY created_at ASC
       `,
-      [userId, otherUserId]
+      [req.user.id, req.params.userId]
     );
 
     res.json(messages.rows);
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+app.get("/conversations", authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT DISTINCT
+        CASE
+          WHEN sender_id = $1 THEN receiver_id
+          ELSE sender_id
+        END AS user_id
+      FROM messages
+      WHERE sender_id = $1 OR receiver_id = $1
+      `,
+      [req.user.id]
+    );
+
+    res.json(result.rows);
   } catch {
     res.status(500).json({ message: "Server error" });
   }
