@@ -276,10 +276,6 @@ app.get("/chat/:userId", authenticateToken, async (req, res) => {
    ROOM SYSTEM
 ============================== */
 
-/* ==============================
-   ROOM SYSTEM
-============================== */
-
 app.post("/rooms", authenticateToken, async (req, res) => {
   try {
     const { name, description } = req.body;
@@ -322,18 +318,16 @@ app.post("/rooms/:roomId/message", authenticateToken, async (req, res) => {
     const { content } = req.body;
     const userId = req.user.id;
 
-    // CHECK IF USER IS MEMBER
     const memberCheck = await pool.query(
-      `SELECT * FROM room_members 
-       WHERE room_id = $1 AND user_id = $2`,
+      `SELECT * FROM room_members
+       WHERE room_id=$1 AND user_id=$2`,
       [roomId, userId]
     );
 
-    if (memberCheck.rows.length === 0) {
+    if (memberCheck.rows.length === 0)
       return res.status(403).json({
         message: "You must join this room to send messages"
       });
-    }
 
     await pool.query(
       `INSERT INTO room_messages (room_id, sender_id, content)
@@ -342,7 +336,6 @@ app.post("/rooms/:roomId/message", authenticateToken, async (req, res) => {
     );
 
     res.json({ message: "Message sent in room ✅" });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
