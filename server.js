@@ -63,6 +63,16 @@ const createTables = async () => {
     );
   `);
 
+  // 🔥 NEW BLOCK TABLE
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS blocks (
+      id SERIAL PRIMARY KEY,
+      blocker_id INT REFERENCES users(id) ON DELETE CASCADE,
+      blocked_id INT REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
   console.log("All tables ready ✅");
 };
 
@@ -154,155 +164,56 @@ app.post("/login", async (req, res) => {
 });
 
 /* ==============================
-   UPDATE PROFILE
+   BLOCK USER
 ============================== */
 
-app.put("/profile", authenticateToken, async (req, res) => {
+app.post("/block/:userId", authenticateToken, async (req, res) => {
   try {
-    const { country, state, city, college, bio } = req.body;
+    const blockerId = req.user.id;
+    const blockedId = parseInt(req.params.userId);
+
+    if (blockerId === blockedId)
+      return res.status(400).json({ message: "Cannot block yourself" });
 
     await pool.query(
-      `UPDATE users 
-       SET country=$1, state=$2, city=$3, college=$4, bio=$5
-       WHERE id=$6`,
-      [country, state, city, college, bio, req.user.id]
-    );
-
-    res.json({ message: "Profile updated ✅" });
-  } catch {
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-/* ==============================
-   GET USERS
-============================== */
-
-app.get("/users", async (req, res) => {
-  try {
-    const { city } = req.query;
-
-    if (city) {
-      const result = await pool.query(
-        "SELECT id,name,email,country,state,city FROM users WHERE city ILIKE $1",
-        [city]
-      );
-      return res.json(result.rows);
-    }
-
-    const result = await pool.query(
-      "SELECT id,name,email,country,state,city FROM users"
-    );
-
-    res.json(result.rows);
-  } catch {
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-/* ==============================
-   CONNECTION SYSTEM
-============================== */
-
-app.post("/connect/:userId", authenticateToken, async (req, res) => {
-  try {
-    const senderId = req.user.id;
-    const receiverId = parseInt(req.params.userId);
-
-    if (senderId === receiverId)
-      return res.status(400).json({ message: "Cannot connect yourself" });
-
-    const existing = await pool.query(
-      `SELECT * FROM connections 
-       WHERE sender_id=$1 AND receiver_id=$2`,
-      [senderId, receiverId]
-    );
-
-    if (existing.rows.length > 0)
-      return res.status(400).json({ message: "Request already sent" });
-
-    await pool.query(
-      `INSERT INTO connections (sender_id, receiver_id)
+      `INSERT INTO blocks (blocker_id, blocked_id)
        VALUES ($1,$2)`,
-      [senderId, receiverId]
+      [blockerId, blockedId]
     );
 
-    res.json({ message: "Connection request sent ✅" });
-  } catch {
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-app.get("/connections", authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.id;
-
-    const result = await pool.query(
-      `SELECT * FROM connections
-       WHERE sender_id=$1 OR receiver_id=$1`,
-      [userId]
-    );
-
-    res.json(result.rows);
-  } catch {
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-app.put("/connect/accept/:id", authenticateToken, async (req, res) => {
-  try {
-    await pool.query(
-      "UPDATE connections SET status='accepted' WHERE id=$1",
-      [req.params.id]
-    );
-
-    res.json({ message: "Connection accepted ✅" });
+    res.json({ message: "User blocked ✅" });
   } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
 
 /* ==============================
-   FRIEND LIST
-============================== */
-
-app.get("/friends", authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.id;
-
-    const result = await pool.query(
-      `
-      SELECT u.id, u.name, u.email, u.city
-      FROM connections c
-      JOIN users u
-        ON (
-          (c.sender_id = $1 AND c.receiver_id = u.id)
-          OR
-          (c.receiver_id = $1 AND c.sender_id = u.id)
-        )
-      WHERE c.status = 'accepted'
-      `,
-      [userId]
-    );
-
-    res.json(result.rows);
-  } catch {
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-/* ==============================
-   MESSAGING
+   MESSAGING (BLOCK CHECK ADDED)
 ============================== */
 
 app.post("/message/:userId", authenticateToken, async (req, res) => {
   try {
+    const senderId = req.user.id;
+    const receiverId = parseInt(req.params.userId);
     const { content } = req.body;
+
+    // 🔥 CHECK BLOCK
+    const blockCheck = await pool.query(
+      `
+      SELECT * FROM blocks
+      WHERE (blocker_id=$1 AND blocked_id=$2)
+         OR (blocker_id=$2 AND blocked_id=$1)
+      `,
+      [senderId, receiverId]
+    );
+
+    if (blockCheck.rows.length > 0)
+      return res.status(403).json({ message: "You cannot message this user" });
 
     await pool.query(
       `INSERT INTO messages (sender_id, receiver_id, content)
        VALUES ($1,$2,$3)`,
-      [req.user.id, req.params.userId, content]
+      [senderId, receiverId, content]
     );
 
     res.json({ message: "Message sent ✅" });
@@ -310,6 +221,10 @@ app.post("/message/:userId", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+/* ==============================
+   CHAT
+============================== */
 
 app.get("/chat/:userId", authenticateToken, async (req, res) => {
   try {
@@ -330,6 +245,10 @@ app.get("/chat/:userId", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+/* ==============================
+   CONVERSATIONS
+============================== */
 
 app.get("/conversations", authenticateToken, async (req, res) => {
   try {
