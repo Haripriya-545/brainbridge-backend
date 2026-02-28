@@ -284,6 +284,123 @@ app.get("/chat/:userId", authenticateToken, async (req, res) => {
 /* ==============================
    SERVER START
 ============================== */
+/* ==============================
+   CREATE ROOM
+============================== */
+
+app.post("/rooms", authenticateToken, async (req, res) => {
+  try {
+    const { name, description } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO rooms (name, description, created_by)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [name, description, req.user.id]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+/* ==============================
+   JOIN ROOM
+============================== */
+
+app.post("/rooms/:roomId/join", authenticateToken, async (req, res) => {
+  try {
+    await pool.query(
+      `INSERT INTO room_members (room_id, user_id)
+       VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [req.params.roomId, req.user.id]
+    );
+
+    res.json({ message: "Joined room ✅" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+/* ==============================
+   SEND ROOM MESSAGE
+============================== */
+
+app.post("/rooms/:roomId/message", authenticateToken, async (req, res) => {
+  try {
+    const { content } = req.body;
+    const roomId = req.params.roomId;
+
+    // Check membership
+    const memberCheck = await pool.query(
+      `SELECT 1 FROM room_members
+       WHERE room_id=$1 AND user_id=$2`,
+      [roomId, req.user.id]
+    );
+
+    if (memberCheck.rows.length === 0) {
+      return res.status(403).json({
+        message: "You must join this room first"
+      });
+    }
+
+    await pool.query(
+      `INSERT INTO room_messages (room_id, sender_id, content)
+       VALUES ($1,$2,$3)`,
+      [roomId, req.user.id, content]
+    );
+
+    res.json({ message: "Message sent in room ✅" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+/* ==============================
+   GET ROOM MESSAGES
+============================== */
+
+app.get("/rooms/:roomId/messages", authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM room_messages
+       WHERE room_id=$1
+       ORDER BY created_at ASC`,
+      [req.params.roomId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+/* ==============================
+   LIST ALL ROOMS
+============================== */
+
+app.get("/rooms", authenticateToken, async (req, res) => {
+  try {
+    const rooms = await pool.query(
+      `SELECT * FROM rooms ORDER BY created_at DESC`
+    );
+
+    res.json(rooms.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 
